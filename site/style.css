@@ -1,0 +1,98 @@
+body {
+    font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif, Apple Color Emoji, Segoe UI Emoji;
+    color: #24292e;
+    margin-top: 40px;
+}
+
+a {
+    color: #0366D6;
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+.about {
+    font-size: smaller;
+    opacity: 0.8;
+}
+
+.release {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: top;
+}
+
+.release > .release-date {
+    height: 90%;
+    flex: 0 0 30%;
+    display: flex;
+    flex-direction: column;
+    margin-right: 8px;
+}
+
+.release > .release-date {
+    margin-top: 4px;
+    margin-left: 20px;
+    margin-right: 20px;
+}
+
+.release > .release-info {
+    height: 90%;
+    flex: 0 0 60%;
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 30px;
+    border-left: 0.5px solid grey;
+    padding-left: 20px;
+}
+
+.release > .release-info > .release-info-name {
+    font-size: 32px;
+}
+
+.release > .release-date > div {
+    flex: 0 0 22%;
+    text-align: right;
+}
+
+.release > .release-date > .release-date-absolute {
+    font-size: 20px;
+    font-weight: 400;
+}
+
+.release > .release-date > .release-date-relative {
+    font-size: 14px;
+    font-weight: 400;
+    opacity: 0.7;
+}
+
+.release > .release-info > div {
+    flex: 0 0 22%;
+}
+
+/*
+.version a {
+    color: #0366D6;
+    text-decoration: none;
+}
+
+.version a:hover {
+    text-decoration: underline;
+}
+
+.version .when {
+
+    display: flex;
+    width: 30%;
+    background: green;
+
+}
+
+.version .release-data {
+
+    display: flex;
+}
+*/

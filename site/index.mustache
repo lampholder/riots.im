@@ -1,0 +1,60 @@
+ <!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Riots.im</title>
+    <link rel="stylesheet" type="text/css" href="style.css" media="screen" />
+  </head>
+  <body>
+    <script>
+        window.onload = () => {
+            let timestamps =
+                document.getElementsByClassName('release-date-relative');
+            for (let timestamp of timestamps) {
+                let d = new Date(timestamp.getAttribute('data-date'));
+                let days = Math.floor((new Date().getTime() - d.getTime()) /
+                    (1000*60*60*24));
+                timestamp.innerText = `${days} days ago`;
+            }
+        };
+    </script>
+    <div class="release">
+        <div class="release-date">
+        </div>
+        <div class="release-info">
+            <div class="release-info-name">Riot Web</div>
+            <div class="release-info-body">
+                <div class="about">
+                    <p>This site hosts historical Riot Web releases. Releases are pulled from <a href="https://github.com/vector-im/riot-web/releases">GitHub</a> into Amazon's S3 and served statically via CloudFront.</p>
+                    <p><a href="privacy.html">Privacy Notice</a></p>
+                </div>
+            </div>
+        </div>
+    </div>
+    {{#releases}}
+    <div class="release">
+        <div class="release-date">
+            <div class="release-date-absolute">{{date}}</div>
+            <div class="release-date-relative" data-date="{{date}}">-- days ago</div>
+        </div>
+        <div class="release-info">
+            <div class="release-info-name"><a href="https://riots.im/{{name}}/">v{{name}}</a></div>
+            <div class="release-info-body">{{{body}}}</div>
+        </div>
+    </div>
+    {{/releases}}
+    <!--
+    <div class="release">
+        <div class="release-date">
+            <div class="release-date-absolute">2019-09-04</div>
+            <div class="release-date-relative" data-date="2019-08-08"> days ago</div>
+        </div>
+        <div class="release-info">
+            <div class="release-info-name"><a href="https://riots.im/1.4.2/">v1.4.2</a></div>
+            <div class="release-info-body">Blah blah blah</div>
+        </div>
+    </div>
+    -->
+  </body>
+</html>
+
