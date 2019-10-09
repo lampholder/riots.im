@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import mimetypes
 import subprocess
 import argparse
@@ -12,21 +13,104 @@ from botocore.exceptions import ClientError
 from markdown import markdown
 from mdx_gfm import GithubFlavoredMarkdownExtension
 
-parser = argparse.ArgumentParser(description='Build a static site hosting historic Riot Web instances')
-parser.add_argument('--index')
-parser.add_argument('--upload')
-parser.add_argument('--aws-access-key-id', required=True)
-parser.add_argument('--aws-secret-access-key', required=True)
-parser.add_argument('--aws-bucket', required=True)
-parser.add_argument('--github-token', required=True)
-args = parser.parse_args()
-
-session = boto3.Session(
-    aws_access_key_id=args.aws_access_key_id,
-    aws_secret_access_key=args.aws_secret_access_key
-)
-s3client = session.client('s3')
-s3resource = session.resource('s3')
+# Older releases aren't identified as proper 'releases' in github. The tarballs
+# were provided by New Vector from their archives (and uploaded directly into
+# S3 manually). Because the dump of tarball releases from New Vector doesn't 
+# map precisely onto the meta persisted in github.com/vector-im/riot-web/releases
+# (i.e. there is not an archived tarball for every tag in github), I have lazily
+# recreated the relevant meta here manually.
+OLDER_RELEASES = [
+    {
+        'name': '0.8.3',
+        'body': '',
+        'date': '2016-10-12'
+    },
+    {
+        'name': '0.8.2-staging',
+        'body': '',
+        'date': '2016-10-05'
+    },
+    {
+        'name': '0.8.1',
+        'body': '',
+        'date': '2016-09-21'
+    },
+    {
+        'name': '0.8.0',
+        'body': '',
+        'date': '2016-09-21'
+    },
+    {
+        'name': '0.7.5-r3',
+        'body': '',
+        'date': '2016-09-02'
+    },
+    {
+        'name': '0.7.5-r2',
+        'body': '',
+        'date': '2016-09-01'
+    },
+    {
+        'name': '0.7.5-r1',
+        'body': '',
+        'date': '2016-08-28'
+    },
+    {
+        'name': '0.7.4',
+        'body': '',
+        'date': '2016-08-11'
+    },
+    {
+        'name': '0.7.3',
+        'body': '',
+        'date': '2016-06-20'
+    },
+    {
+        'name': '0.7.2',
+        'body': '',
+        'date': '2016-06-02'
+    },
+    {
+        'name': '0.7.0',
+        'body': '',
+        'date': '2016-06-02'
+    },
+    {
+        'name': '0.6.1',
+        'body': '',
+        'date': '2016-04-22'
+    },
+    {
+        'name': '0.6.0',
+        'body': '',
+        'date': '2016-04-19'
+    },
+    {
+        'name': '0.5.0',
+        'body': '',
+        'date': '2016-03-30'
+    },
+    {
+        'name': '0.4.1',
+        'body': '',
+        'date': '2016-03-23'
+    },
+    {
+        'name': '0.4.0',
+        'body': '',
+        'date': '2016-03-23'
+    },
+    {
+        'name': '0.3.0',
+        'body': '',
+        'date': '2016-03-11'
+    },
+    {
+        'name': '0.2.0',
+        'body': '',
+        'date': '2016-02-25'
+    }
+]
 
 def compare_version_strings(a, b):
     a = [int(x) for x in a.split('.')]
@@ -64,17 +148,19 @@ def get_download_link(release, extension='.tar.gz'):
 def get_name(release):
     return release.get('tag_name')[1:]
 
-def is_version_uploaded(version):
+def is_version_uploaded(bucket, version):
     try:
-        s3client.head_object(Bucket=args.aws_bucket, Key=version + '/')
+        print('testing if %s is uplaoded' % version)
+        print(bucket.Object(version + '/').last_modified)
     except ClientError as e:
+        print(e)
         if e.response['Error']['Code'] != '404':
             raise
         else:
             return False
     return True
 
-def index(releases, bucket):
+def index(releases, bucket, older_releases=None):
     with open('site/index.mustache', 'r') as f:
         template = f.read()
 
@@ -83,8 +169,11 @@ def index(releases, bucket):
              'body': markdown(release.get('body'), extensions=[GithubFlavoredMarkdownExtension()]) if release.get('body') else '',
              'date': release.get('created_at')[:10]}
             for release in releases
-            if is_version_uploaded(get_name(release))
+            if is_version_uploaded(bucket, get_name(release))
             ]
+
+    if older_releases is not None:
+        released += older_releases
 
     renderer = pystache.Renderer(missing_tags='strict')
     rendered = renderer.render(template, {'releases': released})
@@ -109,7 +198,10 @@ def index(releases, bucket):
 def upload(releases, bucket):
     for release in releases:
         name = get_name(release)
-        if is_version_uploaded(name):
+        if name == '0.7.3':
+            # We can't process any releases from 0.7.3 and older :( (yet)
+            break
+        if is_version_uploaded(bucket, name):
             print('%s: already hosted in bucket' % name, file=sys.stderr)
         else:
             print('%s: not hosted in bucket; fetching...' % name, file=sys.stderr)
@@ -152,10 +244,57 @@ def upload(releases, bucket):
             bucket.put_object(Key='%s/' % name, Body='')
             print('%s upload complete; now available at https://riots.im/%s' % (name, name))
 
-releases = get_releases('vector-im', 'riot-web', token=args.github_token)
-bucket = s3resource.Bucket(args.aws_bucket)
 
-if args.index:
-    index(releases, bucket)
-if args.upload:
-    upload(release, bucket)
+def do_the_needful(aws_access_key_id, aws_secret_access_key, aws_bucket,
+        github_token, run_index, run_upload):
+
+    session = boto3.Session(
+        aws_access_key_id=aws_access_key_id,
+        aws_secret_access_key=aws_secret_access_key
+    )
+    s3client = session.client('s3')
+    s3resource = session.resource('s3')
+
+    releases = get_releases('vector-im', 'riot-web', token=github_token)
+    bucket = s3resource.Bucket(aws_bucket)
+
+    if run_index:
+        index(releases, bucket, OLDER_RELEASES)
+    if run_upload:
+        upload(releases, bucket)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Build a static site hosting historic Riot Web instances')
+    parser.add_argument('--index', action="store_true")
+    parser.add_argument('--upload', action="store_true")
+    parser.add_argument('--aws-access-key-id', required=True)
+    parser.add_argument('--aws-secret-access-key', required=True)
+    parser.add_argument('--aws-bucket', required=True)
+    parser.add_argument('--github-token', required=True)
+    args = parser.parse_args()
+
+    do_the_needful(
+        aws_access_key_id=args.aws_access_key_id,
+        aws_secret_access_key=args.aws_secret_access_key,
+        aws_bucket=args.aws_bucket,
+        github_token=args.github_token,
+        run_index=args.index,
+        run_upload=args.upload
+    )
+
+def lambda_handler(who, cares):
+    do_the_needful(
+        aws_access_key_id=os.environ['aws_access_key_id'],
+        aws_secret_access_key=os.environ['aws_secret_access_key'],
+        aws_bucket=os.environ['aws_bucket'],
+        github_token=os.environ['github_token'],
+        run_index=True,
+        run_upload=True
+    )
+
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Hello from Lambda!')
+    }
+
