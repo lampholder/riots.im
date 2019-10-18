@@ -1,5 +1,4 @@
 import os
-import sys
 import json
 import mimetypes
 import subprocess
@@ -9,6 +8,7 @@ import shutil
 import boto3
 import pystache
 import requests
+from bs4 import BeautifulSoup
 from botocore.exceptions import ClientError
 from markdown import markdown
 from mdx_gfm import GithubFlavoredMarkdownExtension
@@ -150,10 +150,8 @@ def get_name(release):
 
 def is_version_uploaded(bucket, version):
     try:
-        print('testing if %s is uplaoded' % version)
-        print(bucket.Object(version + '/').last_modified)
+        _ = bucket.Object(version + '/').last_modified
     except ClientError as e:
-        print(e)
         if e.response['Error']['Code'] != '404':
             raise
         else:
@@ -166,7 +164,7 @@ def index(releases, bucket, older_releases=None):
 
     released = [
             {'name': release.get('name')[1:],
-             'body': markdown(release.get('body'), extensions=[GithubFlavoredMarkdownExtension()]) if release.get('body') else '',
+             'body': BeautifulSoup(markdown(release.get('body'), extensions=[GithubFlavoredMarkdownExtension()]), 'html.parser').prettify() if release.get('body') else '',
              'date': release.get('created_at')[:10]}
             for release in releases
             if is_version_uploaded(bucket, get_name(release))
@@ -194,54 +192,66 @@ def index(releases, bucket, older_releases=None):
                               ACL='public-read',
                               ContentType=mime_type)
 
+def upload_directory(name, root, bucket):
+    for subdir, dirs, files in os.walk(root):
+        for file in files:
+            full_path = os.path.join(subdir, file)
+            destination_path = name + full_path[len(root):]
+            with open(full_path, 'rb') as data:
+                mime_type = mimetypes.guess_type(full_path)[0]
+                if not mime_type:
+                    mime_type = 'application/octet-stream'
+                print('Putting %s (%s)' % (destination_path, mime_type))
+                bucket.put_object(Key=destination_path,
+                                  Body=data,
+                                  ACL='public-read',
+                                  ContentType=mime_type)
+    # If we don't do this, we can't easily test whether the 'directory' exists in S3
+    bucket.put_object(Key='%s/' % name, Body='')
 
-def upload(releases, bucket):
+
+def upload(releases, bucket, older_releases):
+    for release in older_releases:
+        name = release.get('name')
+        if is_version_uploaded(bucket, name):
+            print('%s: (older release) already hosted in bucket' % name)
+        else:
+            print('%s: (older release) uploading' % name)
+            upload_directory(name, 'older_riots/%s' % name, bucket)
+            print('%s: (older release) uploaded' % name)
+
     for release in releases:
         name = get_name(release)
         if name == '0.7.3':
             # We can't process any releases from 0.7.3 and older :( (yet)
             break
         if is_version_uploaded(bucket, name):
-            print('%s: already hosted in bucket' % name, file=sys.stderr)
+            print('%s: already hosted in bucket' % name)
         else:
-            print('%s: not hosted in bucket; fetching...' % name, file=sys.stderr)
+            print('%s: not hosted in bucket; fetching...' % name)
             download_url = get_download_link(release)
             response = requests.get(download_url)
-            os.makedirs('downloads/%s' % name, exist_ok=True)
+            os.makedirs('/tmp/downloads/%s' % name, exist_ok=True)
             if response.status_code == 200:
-                filename = 'downloads/%s/%s.tar.gz' % (name, name)
+                filename = '/tmp/downloads/%s/%s.tar.gz' % (name, name)
                 with open(filename, 'wb') as download:
                     for chunk in response.iter_content(chunk_size=128):
                         download.write(chunk)
-            print('%s: tarball downloaded; exploding...' % name, file=sys.stderr)
-            os.makedirs('exploded/%s' % name, exist_ok=True)
-            subprocess.call(['tar', '-zxf', filename, '-C', 'exploded/%s/' % name])
-            tar_root = 'exploded/%s/%s' % (name, os.listdir('exploded/%s/' % name)[0])
+            print('%s: tarball downloaded; exploding...' % name)
+            os.makedirs('/tmp/exploded/%s' % name, exist_ok=True)
+            subprocess.call(['tar', '-zxf', filename, '-C', '/tmp/exploded/%s/' % name])
+            tar_root = '/tmp/exploded/%s/%s' % (name, os.listdir('/tmp/exploded/%s/' % name)[0])
 
             if name != '0.9.0':
-                print('%s: tarball exploded; copying default config...' % name, file=sys.stderr)
+                print('%s: tarball exploded; copying default config...' % name)
                 shutil.copyfile(tar_root + '/config.sample.json', tar_root + '/config.json')
             else:
-                print('%s: tarball exploded; patching in a config file for 0.9.0, released without config...' % name, file=sys.stderr)
+                print('%s: tarball exploded; patching in a config file for 0.9.0, released without config...' % name)
                 shutil.copyfile('config.0.9.0.json', tar_root + '/config.json')
 
-            print('%s: config inserted; uploading to s3...' % name, file=sys.stderr)
+            print('%s: config inserted; uploading to s3...' % name)
 
-            for subdir, dirs, files in os.walk(tar_root):
-                for file in files:
-                    full_path = os.path.join(subdir, file)
-                    destination_path = name + full_path[len(tar_root):]
-                    with open(full_path, 'rb') as data:
-                        mime_type = mimetypes.guess_type(full_path)[0]
-                        if not mime_type:
-                            mime_type = 'application/octet-stream'
-                        print('Putting %s (%s)' % (destination_path, mime_type))
-                        bucket.put_object(Key=destination_path,
-                                          Body=data,
-                                          ACL='public-read',
-                                          ContentType=mime_type)
-            # If we don't do this, we can't easily test whether the 'directory' exists in S3
-            bucket.put_object(Key='%s/' % name, Body='')
+            upload_directory(name, tar_root, bucket)
             print('%s upload complete; now available at https://riots.im/%s' % (name, name))
 
 
@@ -261,7 +271,7 @@ def do_the_needful(aws_access_key_id, aws_secret_access_key, aws_bucket,
     if run_index:
         index(releases, bucket, OLDER_RELEASES)
     if run_upload:
-        upload(releases, bucket)
+        upload(releases, bucket, OLDER_RELEASES)
 
 
 if __name__ == '__main__':
