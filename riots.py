@@ -1,4 +1,5 @@
 import os
+import time
 import json
 import mimetypes
 import subprocess
@@ -255,8 +256,23 @@ def upload(releases, bucket, older_releases):
             print('%s upload complete; now available at https://riots.im/%s' % (name, name))
 
 
+def invalidate_cloudfront_cache(cloudfrontClient, distributionId):
+    paths = ['/', '/index.html']
+    batch = {
+        'Paths': {
+            'Quantity': len(paths),
+            'Items': paths
+        },
+        'CallerReference': str(time.time())
+    }
+    invalidation = cloudfrontClient.create_invalidation(
+        DistributionId=distributionId,
+        InvalidationBatch=batch,
+    )
+    return batch
+
 def do_the_needful(aws_access_key_id, aws_secret_access_key, aws_bucket,
-        github_token, run_index, run_upload):
+        aws_cloudfront_distribution_id, github_token, run_index, run_upload):
 
     session = boto3.Session(
         aws_access_key_id=aws_access_key_id,
@@ -264,6 +280,7 @@ def do_the_needful(aws_access_key_id, aws_secret_access_key, aws_bucket,
     )
     s3client = session.client('s3')
     s3resource = session.resource('s3')
+    cloudfrontClient = session.client('cloudfront')
 
     releases = get_releases('vector-im', 'riot-web', token=github_token)
     bucket = s3resource.Bucket(aws_bucket)
@@ -273,6 +290,8 @@ def do_the_needful(aws_access_key_id, aws_secret_access_key, aws_bucket,
     if run_upload:
         upload(releases, bucket, OLDER_RELEASES)
 
+    invalidate_cloudfront_cache(cloudfrontClient, aws_cloudfront_distribution_id)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Build a static site hosting historic Riot Web instances')
@@ -281,6 +300,7 @@ if __name__ == '__main__':
     parser.add_argument('--aws-access-key-id', required=True)
     parser.add_argument('--aws-secret-access-key', required=True)
     parser.add_argument('--aws-bucket', required=True)
+    parser.add_argument('--aws-cloudfront-distribution-id', required=True)
     parser.add_argument('--github-token', required=True)
     args = parser.parse_args()
 
@@ -288,9 +308,10 @@ if __name__ == '__main__':
         aws_access_key_id=args.aws_access_key_id,
         aws_secret_access_key=args.aws_secret_access_key,
         aws_bucket=args.aws_bucket,
+        aws_cloudfront_distribution_id=args.aws_cloudfront_distribution_id,
         github_token=args.github_token,
         run_index=args.index,
-        run_upload=args.upload
+        run_upload=args.upload,
     )
 
 def lambda_handler(who, cares):
@@ -298,6 +319,7 @@ def lambda_handler(who, cares):
         aws_access_key_id=os.environ['aws_access_key_id'],
         aws_secret_access_key=os.environ['aws_secret_access_key'],
         aws_bucket=os.environ['aws_bucket'],
+        aws_cloudfront_distribution_id=os.environ['aws_cloudfront_distribution_id'],
         github_token=os.environ['github_token'],
         run_index=True,
         run_upload=True
