@@ -16,7 +16,7 @@ pystache==0.5.4
 python-dateutil==2.8.0
 PyYAML==5.1.2
 requests==2.22.0
-rsa==3.4.2
+rsa==4.7
 s3transfer==0.2.1
 six==1.12.0
 soupsieve==1.9.4
